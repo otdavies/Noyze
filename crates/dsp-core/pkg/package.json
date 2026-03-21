@@ -1,0 +1,15 @@
+{
+  "name": "noyze-dsp",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "noyze_dsp_bg.wasm",
+    "noyze_dsp.js",
+    "noyze_dsp.d.ts"
+  ],
+  "main": "noyze_dsp.js",
+  "types": "noyze_dsp.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
