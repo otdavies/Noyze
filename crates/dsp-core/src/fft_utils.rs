@@ -12,10 +12,24 @@ pub fn with_planner<R>(f: impl FnOnce(&mut FftPlanner<f32>) -> R) -> R {
     PLANNER.with(|p| f(&mut p.borrow_mut()))
 }
 
+/// Hann window via apodize crate
 pub fn hann_window(size: usize) -> Vec<f32> {
-    (0..size)
-        .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / size as f32).cos()))
-        .collect()
+    apodize::hanning_iter(size).map(|x| x as f32).collect()
+}
+
+/// Hamming window — better sidelobe suppression than Hann
+pub fn hamming_window(size: usize) -> Vec<f32> {
+    apodize::hamming_iter(size).map(|x| x as f32).collect()
+}
+
+/// Blackman window — excellent sidelobe rejection, wider main lobe
+pub fn blackman_window(size: usize) -> Vec<f32> {
+    apodize::blackman_iter(size).map(|x| x as f32).collect()
+}
+
+/// Nuttall window — near-optimal sidelobe suppression
+pub fn nuttall_window(size: usize) -> Vec<f32> {
+    apodize::nuttall_iter(size).map(|x| x as f32).collect()
 }
 
 pub fn find_zero_crossing(samples: &[f32], pos: usize, search_radius: usize) -> usize {

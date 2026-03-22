@@ -1,92 +1,10 @@
 /// Auto EQ — 5-band parametric equalizer using cascaded biquad filters.
 /// Bands: sub(0-80Hz), low(80-300Hz), mid(300-2kHz), presence(2k-8kHz), air(8k-20kHz)
 ///
-/// Uses O(n) biquad filters instead of STFT — processes millions of samples
-/// in milliseconds with zero heap allocation beyond the output buffer.
+/// Uses the `biquad` crate for optimized filter coefficient calculation
+/// and Direct Form 2 Transposed processing.
 
-use std::f32::consts::PI;
-
-struct Biquad {
-    b0: f32, b1: f32, b2: f32,
-    a1: f32, a2: f32,
-    x1: f32, x2: f32,
-    y1: f32, y2: f32,
-}
-
-impl Biquad {
-    /// Create a peaking EQ filter (constant-Q)
-    fn peaking(center_freq: f32, sample_rate: f32, gain_db: f32, q: f32) -> Self {
-        let a = 10.0f32.powf(gain_db / 40.0); // sqrt of linear gain
-        let w0 = 2.0 * PI * center_freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let sin_w0 = w0.sin();
-        let alpha = sin_w0 / (2.0 * q);
-
-        let a0 = 1.0 + alpha / a;
-        Biquad {
-            b0: (1.0 + alpha * a) / a0,
-            b1: (-2.0 * cos_w0) / a0,
-            b2: (1.0 - alpha * a) / a0,
-            a1: (-2.0 * cos_w0) / a0,
-            a2: (1.0 - alpha / a) / a0,
-            x1: 0.0, x2: 0.0,
-            y1: 0.0, y2: 0.0,
-        }
-    }
-
-    /// Create a low-shelf filter
-    fn low_shelf(freq: f32, sample_rate: f32, gain_db: f32) -> Self {
-        let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * PI * freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let sin_w0 = w0.sin();
-        let alpha = sin_w0 / (2.0 * 0.707); // Q = 1/sqrt(2)
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-
-        let a0 = (a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha;
-        Biquad {
-            b0: (a * ((a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha)) / a0,
-            b1: (2.0 * a * ((a - 1.0) - (a + 1.0) * cos_w0)) / a0,
-            b2: (a * ((a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha)) / a0,
-            a1: (-2.0 * ((a - 1.0) + (a + 1.0) * cos_w0)) / a0,
-            a2: ((a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha) / a0,
-            x1: 0.0, x2: 0.0,
-            y1: 0.0, y2: 0.0,
-        }
-    }
-
-    /// Create a high-shelf filter
-    fn high_shelf(freq: f32, sample_rate: f32, gain_db: f32) -> Self {
-        let a = 10.0f32.powf(gain_db / 40.0);
-        let w0 = 2.0 * PI * freq / sample_rate;
-        let cos_w0 = w0.cos();
-        let sin_w0 = w0.sin();
-        let alpha = sin_w0 / (2.0 * 0.707);
-        let two_sqrt_a_alpha = 2.0 * a.sqrt() * alpha;
-
-        let a0 = (a + 1.0) - (a - 1.0) * cos_w0 + two_sqrt_a_alpha;
-        Biquad {
-            b0: (a * ((a + 1.0) + (a - 1.0) * cos_w0 + two_sqrt_a_alpha)) / a0,
-            b1: (-2.0 * a * ((a - 1.0) + (a + 1.0) * cos_w0)) / a0,
-            b2: (a * ((a + 1.0) + (a - 1.0) * cos_w0 - two_sqrt_a_alpha)) / a0,
-            a1: (2.0 * ((a - 1.0) - (a + 1.0) * cos_w0)) / a0,
-            a2: ((a + 1.0) - (a - 1.0) * cos_w0 - two_sqrt_a_alpha) / a0,
-            x1: 0.0, x2: 0.0,
-            y1: 0.0, y2: 0.0,
-        }
-    }
-
-    #[inline(always)]
-    fn process_sample(&mut self, x: f32) -> f32 {
-        let y = self.b0 * x + self.b1 * self.x1 + self.b2 * self.x2
-              - self.a1 * self.y1 - self.a2 * self.y2;
-        self.x2 = self.x1;
-        self.x1 = x;
-        self.y2 = self.y1;
-        self.y1 = y;
-        y
-    }
-}
+use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type};
 
 pub fn process_auto_eq(
     samples: &[f32],
@@ -111,24 +29,36 @@ pub fn process_auto_eq(
         .collect();
 
     // Build 5-band EQ: low shelf + 3 peaking + high shelf
-    // Band centers: sub=40Hz, low=150Hz, mid=800Hz, presence=4kHz, air=12kHz
-    let mut filters = [
-        Biquad::low_shelf(80.0, sr, g[0]),                  // Sub band
-        Biquad::peaking(150.0, sr, g[1], 0.8),              // Low band
-        Biquad::peaking(800.0, sr, g[2], 0.8),              // Mid band
-        Biquad::peaking(4000.0, sr, g[3], 0.8),             // Presence band
-        Biquad::high_shelf(8000.0, sr, g[4]),                // Air band
+    let filters: Vec<Option<DirectForm2Transposed<f32>>> = vec![
+        make_filter(Type::LowShelf(g[0]), sr, 80.0, 0.707),
+        make_filter(Type::PeakingEQ(g[1]), sr, 150.0, 0.8),
+        make_filter(Type::PeakingEQ(g[2]), sr, 800.0, 0.8),
+        make_filter(Type::PeakingEQ(g[3]), sr, 4000.0, 0.8),
+        make_filter(Type::HighShelf(g[4]), sr, 8000.0, 0.707),
     ];
 
-    // Process all samples through the filter cascade — O(n), zero allocation
+    let mut active: Vec<DirectForm2Transposed<f32>> = filters.into_iter().flatten().collect();
+
+    // Process all samples through the filter cascade
     let mut output = Vec::with_capacity(samples.len());
     for &s in samples {
         let mut x = s;
-        for f in filters.iter_mut() {
-            x = f.process_sample(x);
+        for f in active.iter_mut() {
+            x = f.run(x);
         }
         output.push(x);
     }
 
     output
+}
+
+fn make_filter(
+    filter_type: Type<f32>,
+    sample_rate: f32,
+    freq: f32,
+    q: f32,
+) -> Option<DirectForm2Transposed<f32>> {
+    Coefficients::<f32>::from_params(filter_type, sample_rate.hz(), freq.hz(), q)
+        .ok()
+        .map(|c| DirectForm2Transposed::<f32>::new(c))
 }

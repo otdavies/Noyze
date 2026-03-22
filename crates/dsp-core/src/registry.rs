@@ -97,7 +97,7 @@ pub fn process_mono_chain(
     // --- Mastering effects ---
 
     if let Some(ref cfg) = config.saturate {
-        buf = effects::saturate::process_saturate(&buf, cfg.drive, cfg.warmth);
+        buf = effects::saturate::process_saturate(&buf, sr, cfg.drive, cfg.warmth);
     }
 
     if let Some(ref cfg) = config.excite {
@@ -191,7 +191,7 @@ pub fn process_fx_chunk(
     }
 
     if let Some(ref cfg) = config.saturate {
-        buf = effects::saturate::process_saturate(&buf, cfg.drive, cfg.warmth);
+        buf = effects::saturate::process_saturate(&buf, sr, cfg.drive, cfg.warmth);
     }
 
     if let Some(ref cfg) = config.excite {

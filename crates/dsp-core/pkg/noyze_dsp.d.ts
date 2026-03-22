@@ -7,30 +7,20 @@
 export function default_config(): string;
 
 /**
- * Process audio through the full effect chain (legacy single-call API).
- */
-export function process_chain(input_l: Float32Array, input_r: Float32Array, ref_l: Float32Array, sample_rate: number, config_json: string): Float32Array;
-
-/**
- * Process a single mono channel through all enabled effects (stepped API).
- */
-export function process_mono(samples: Float32Array, ref_l: Float32Array, sample_rate: number, config_json: string): Float32Array;
-
-/**
- * Apply stereo effects + interleave + normalize (stepped API).
- */
-export function finalize_stereo(out_l: Float32Array, out_r: Float32Array, sample_rate: number, config_json: string): Float32Array;
-
-/**
- * Interleave mono to stereo + normalize (stepped API).
+ * Interleave mono to stereo and normalize. Used when no stereo effects needed.
  */
 export function finalize_mono(out: Float32Array): Float32Array;
 
 /**
- * Phase 1: Structural effects (beats, warp, ref_warp, seamless_loop).
- * Must process the full buffer. Fast — O(n), no FFT.
+ * Apply stereo effects (e.g., stereo widen) to two pre-processed channels.
+ * Returns interleaved stereo output [L,R,L,R,...], normalized to 0.98 peak.
  */
-export function process_structural(samples: Float32Array, ref_l: Float32Array, sample_rate: number, config_json: string): Float32Array;
+export function finalize_stereo(out_l: Float32Array, out_r: Float32Array, sample_rate: number, config_json: string): Float32Array;
+
+/**
+ * Legacy all-in-one API (kept for backwards compatibility).
+ */
+export function process_chain(input_l: Float32Array, input_r: Float32Array, ref_l: Float32Array, sample_rate: number, config_json: string): Float32Array;
 
 /**
  * Phase 2: FX effects (reshape, reverb, saturate, etc.) on a chunk.
@@ -38,12 +28,29 @@ export function process_structural(samples: Float32Array, ref_l: Float32Array, s
  */
 export function process_fx_chunk(samples: Float32Array, sample_rate: number, config_json: string): Float32Array;
 
+/**
+ * Process a single mono channel through all enabled effects.
+ * Returns processed samples (NOT normalized — caller handles final normalization).
+ */
+export function process_mono(samples: Float32Array, ref_l: Float32Array, sample_rate: number, config_json: string): Float32Array;
+
+/**
+ * Phase 1: Structural effects (beats, warp, ref_warp, seamless_loop).
+ * Must process the full buffer. Fast — O(n), no FFT.
+ */
+export function process_structural(samples: Float32Array, ref_l: Float32Array, sample_rate: number, config_json: string): Float32Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
-    readonly default_config: () => [number, number];
+    readonly process_mono: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly finalize_stereo: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly finalize_mono: (a: number, b: number) => [number, number];
+    readonly process_structural: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => [number, number];
+    readonly process_fx_chunk: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly process_chain: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
+    readonly default_config: () => [number, number];
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;

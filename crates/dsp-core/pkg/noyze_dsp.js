@@ -18,12 +18,43 @@ export function default_config() {
 }
 
 /**
- * Process audio through the full effect chain.
- * input_l: left channel samples
- * input_r: right channel samples (empty slice for mono)
- * ref_l: reference audio samples (empty slice if none)
- * sample_rate: audio sample rate
- * config_json: JSON-serialized ChainConfig
+ * Interleave mono to stereo and normalize. Used when no stereo effects needed.
+ * @param {Float32Array} out
+ * @returns {Float32Array}
+ */
+export function finalize_mono(out) {
+    const ptr0 = passArrayF32ToWasm0(out, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.finalize_mono(ptr0, len0);
+    var v2 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v2;
+}
+
+/**
+ * Apply stereo effects (e.g., stereo widen) to two pre-processed channels.
+ * Returns interleaved stereo output [L,R,L,R,...], normalized to 0.98 peak.
+ * @param {Float32Array} out_l
+ * @param {Float32Array} out_r
+ * @param {number} sample_rate
+ * @param {string} config_json
+ * @returns {Float32Array}
+ */
+export function finalize_stereo(out_l, out_r, sample_rate, config_json) {
+    const ptr0 = passArrayF32ToWasm0(out_l, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(out_r, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.finalize_stereo(ptr0, len0, ptr1, len1, sample_rate, ptr2, len2);
+    var v4 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v4;
+}
+
+/**
+ * Legacy all-in-one API (kept for backwards compatibility).
  * @param {Float32Array} input_l
  * @param {Float32Array} input_r
  * @param {Float32Array} ref_l
@@ -46,9 +77,83 @@ export function process_chain(input_l, input_r, ref_l, sample_rate, config_json)
     return v5;
 }
 
+/**
+ * Phase 2: FX effects (reshape, reverb, saturate, etc.) on a chunk.
+ * Caller should provide overlap at boundaries for STFT effects.
+ * @param {Float32Array} samples
+ * @param {number} sample_rate
+ * @param {string} config_json
+ * @returns {Float32Array}
+ */
+export function process_fx_chunk(samples, sample_rate, config_json) {
+    const ptr0 = passArrayF32ToWasm0(samples, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.process_fx_chunk(ptr0, len0, sample_rate, ptr1, len1);
+    var v3 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v3;
+}
+
+/**
+ * Process a single mono channel through all enabled effects.
+ * Returns processed samples (NOT normalized — caller handles final normalization).
+ * @param {Float32Array} samples
+ * @param {Float32Array} ref_l
+ * @param {number} sample_rate
+ * @param {string} config_json
+ * @returns {Float32Array}
+ */
+export function process_mono(samples, ref_l, sample_rate, config_json) {
+    const ptr0 = passArrayF32ToWasm0(samples, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(ref_l, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.process_mono(ptr0, len0, ptr1, len1, sample_rate, ptr2, len2);
+    var v4 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v4;
+}
+
+/**
+ * Phase 1: Structural effects (beats, warp, ref_warp, seamless_loop).
+ * Must process the full buffer. Fast — O(n), no FFT.
+ * @param {Float32Array} samples
+ * @param {Float32Array} ref_l
+ * @param {number} sample_rate
+ * @param {string} config_json
+ * @returns {Float32Array}
+ */
+export function process_structural(samples, ref_l, sample_rate, config_json) {
+    const ptr0 = passArrayF32ToWasm0(samples, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArrayF32ToWasm0(ref_l, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ptr2 = passStringToWasm0(config_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    const len2 = WASM_VECTOR_LEN;
+    const ret = wasm.process_structural(ptr0, len0, ptr1, len1, sample_rate, ptr2, len2);
+    var v4 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v4;
+}
+
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
+        __wbg___wbindgen_throw_6ddd609b62940d55: function(arg0, arg1) {
+            throw new Error(getStringFromWasm0(arg0, arg1));
+        },
+        __wbg_error_8d9a8e04cd1d3588: function(arg0) {
+            console.error(arg0);
+        },
+        __wbindgen_cast_0000000000000001: function(arg0, arg1) {
+            // Cast intrinsic for `Ref(String) -> Externref`.
+            const ret = getStringFromWasm0(arg0, arg1);
+            return ret;
+        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);
