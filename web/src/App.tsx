@@ -41,19 +41,23 @@ export default function App() {
   const playOffsetRef = useRef(0); // offset in seconds where playback started
   const playDurationRef = useRef(0); // total duration of playing buffer
   const jobGenRef = useRef(0); // generation counter for cancelling stale results
+  const isProcessingRef = useRef(false); // tracks worker busy state (ref, not render-dependent)
 
-  useEffect(() => {
+  const createWorker = useCallback(() => {
     const worker = new Worker(
       new URL('./dsp/worker.ts', import.meta.url),
       { type: 'module' }
     );
     worker.onmessage = (e: MessageEvent) => {
       const msg = e.data;
+      // 'ready' has no _gen — let it through silently
+      if (msg.type === 'ready') return;
       // Ignore results from stale jobs
       if (msg._gen !== undefined && msg._gen !== jobGenRef.current) return;
       if (msg.type === 'progress') {
         setProgress(msg.value);
       } else if (msg.type === 'result') {
+        isProcessingRef.current = false;
         setProcessedAudio(msg.output);
         setProcessedChannels(msg.channels);
         setProcessedSampleRate(msg.sampleRate);
@@ -63,14 +67,19 @@ export default function App() {
         setIsFlashing(true);
         setTimeout(() => setIsFlashing(false), 400);
       } else if (msg.type === 'error') {
+        isProcessingRef.current = false;
         setIsProcessing(false);
         setErrorMessage(msg.message);
         console.error('Worker error:', msg.message);
       }
     };
-    workerRef.current = worker;
-    return () => worker.terminate();
+    return worker;
   }, []);
+
+  useEffect(() => {
+    workerRef.current = createWorker();
+    return () => workerRef.current?.terminate();
+  }, [createWorker]);
 
   const getAudioCtx = useCallback(() => {
     if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
@@ -84,11 +93,24 @@ export default function App() {
   }, [getAudioCtx]);
 
   const processAudio = useCallback((config: ChainConfig, buffer: AudioBuffer | null, ref: AudioBuffer | null) => {
-    if (!buffer || !workerRef.current) return;
+    if (!buffer) return;
 
     // Bump generation to invalidate any in-flight results
     const gen = ++jobGenRef.current;
 
+    // If the worker is still processing a previous job, kill it and start fresh.
+    // WASM processing is synchronous inside the worker so messages just queue up —
+    // terminating is the only way to truly cancel.
+    if (isProcessingRef.current && workerRef.current) {
+      workerRef.current.terminate();
+      workerRef.current = createWorker();
+    }
+
+    if (!workerRef.current) {
+      workerRef.current = createWorker();
+    }
+
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setProgress(0);
     setErrorMessage(null);
@@ -106,7 +128,7 @@ export default function App() {
       sampleRate: buffer.sampleRate,
       _gen: gen,
     });
-  }, []);
+  }, [createWorker]);
 
   // Debounced reprocess on config change
   useEffect(() => {

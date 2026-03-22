@@ -132,11 +132,12 @@ describe('DSP Worker', () => {
   });
 
   describe('before WASM init', () => {
-    it('returns error when WASM not ready', () => {
+    it('queues message when WASM not ready (no immediate error)', () => {
       sendProcess(defaultConfig(), sineInput);
       const error = messages.find(m => m.type === 'error');
-      expect(error).toBeDefined();
-      expect(error.message).toContain('WASM');
+      // Worker now queues messages until WASM is ready instead of returning an error.
+      // This supports the terminate-and-respawn cancellation pattern.
+      expect(error).toBeUndefined();
     });
   });
 

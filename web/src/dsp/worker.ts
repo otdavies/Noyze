@@ -3,6 +3,10 @@
 // Processes the full buffer through all effects in a single pass.
 // No chunking — effects must process the entire buffer to maintain
 // state continuity (reverb tails, filter states, LFO phases, STFT context).
+//
+// If a message arrives before WASM is ready, it is queued and processed
+// once initialization completes. This supports the terminate-and-respawn
+// cancellation pattern used by the main thread.
 
 import init, {
   process_chain as wasm_process_chain,
@@ -13,9 +17,19 @@ import init, {
 
 let wasmReady = false;
 let wasmError: string | null = null;
+let pendingMessage: MessageEvent | null = null;
 
 init()
-  .then(() => { wasmReady = true; })
+  .then(() => {
+    wasmReady = true;
+    self.postMessage({ type: 'ready' });
+    // Process any message that arrived while WASM was loading
+    if (pendingMessage) {
+      const e = pendingMessage;
+      pendingMessage = null;
+      handleProcessMessage(e);
+    }
+  })
   .catch((err: unknown) => {
     wasmError = `WASM initialization failed: ${String(err)}`;
   });
@@ -108,35 +122,43 @@ function processAudio(
   return { output: new Float32Array(result), channels: 2, sampleRate: sr };
 }
 
-// ---- WORKER MESSAGE HANDLER ----
-self.onmessage = (e: MessageEvent) => {
+function handleProcessMessage(e: MessageEvent) {
   const { type, inputL, inputR, refL, config, sampleRate, _gen } = e.data;
   currentGen = _gen;
 
-  if (type === 'process') {
-    if (!wasmReady) {
-      const msg = wasmError || 'WASM module is still loading. Please try again in a moment.';
-      self.postMessage({ type: 'error', message: msg, _gen });
-      return;
-    }
+  if (type !== 'process') return;
 
-    try {
-      const result = processAudio(
-        new Float32Array(inputL),
-        inputR ? new Float32Array(inputR) : null,
-        refL ? new Float32Array(refL) : null,
-        config,
-        sampleRate,
-      );
-      self.postMessage({
-        type: 'result',
-        output: result.output,
-        channels: result.channels,
-        sampleRate: result.sampleRate,
-        _gen,
-      }, [result.output.buffer] as any);
-    } catch (err) {
-      self.postMessage({ type: 'error', message: String(err), _gen });
-    }
+  try {
+    const result = processAudio(
+      new Float32Array(inputL),
+      inputR ? new Float32Array(inputR) : null,
+      refL ? new Float32Array(refL) : null,
+      config,
+      sampleRate,
+    );
+    self.postMessage({
+      type: 'result',
+      output: result.output,
+      channels: result.channels,
+      sampleRate: result.sampleRate,
+      _gen,
+    }, [result.output.buffer] as any);
+  } catch (err) {
+    self.postMessage({ type: 'error', message: String(err), _gen });
   }
+}
+
+// ---- WORKER MESSAGE HANDLER ----
+self.onmessage = (e: MessageEvent) => {
+  if (!wasmReady) {
+    if (wasmError) {
+      const { _gen } = e.data;
+      self.postMessage({ type: 'error', message: wasmError, _gen });
+    } else {
+      // WASM still loading — queue this message (replaces any previous pending)
+      pendingMessage = e;
+    }
+    return;
+  }
+  handleProcessMessage(e);
 };
