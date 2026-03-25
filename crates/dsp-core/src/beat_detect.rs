@@ -1,57 +1,46 @@
-use crate::fft_utils::{stft, find_zero_crossing};
+use crate::fft_utils::find_zero_crossing;
 
-/// Estimate tempo (BPM) from onset strength signal using autocorrelation.
-/// Returns the most likely BPM and the corresponding period in samples.
+/// Estimate tempo (BPM) from energy onset signal using autocorrelation.
 fn estimate_tempo(flux: &[f32], hop: usize, sample_rate: u32) -> (f32, usize) {
-    // Search BPM range 60-200
     let sr = sample_rate as f32;
-    let min_lag = (60.0 * sr / (200.0 * hop as f32)) as usize; // ~200 BPM
-    let max_lag = (60.0 * sr / (60.0 * hop as f32)) as usize;  // ~60 BPM
+    let min_lag = (60.0 * sr / (200.0 * hop as f32)) as usize;
+    let max_lag = (60.0 * sr / (60.0 * hop as f32)) as usize;
     let max_lag = max_lag.min(flux.len() / 2);
 
     if min_lag >= max_lag || flux.len() < max_lag * 2 {
-        // Fallback: assume 120 BPM
         let period = (sr * 60.0 / 120.0) as usize;
         return (120.0, period);
     }
 
-    // Autocorrelation of onset strength
+    // Subsample the autocorrelation — check every 2nd lag, then refine
     let mut best_corr = 0.0f32;
     let mut best_lag = min_lag;
+    let count_max = flux.len();
 
-    for lag in min_lag..max_lag {
+    for lag in (min_lag..max_lag).step_by(2) {
+        let count = count_max - lag;
         let mut corr = 0.0f32;
-        let mut norm_a = 0.0f32;
-        let mut norm_b = 0.0f32;
-        let count = flux.len() - lag;
+        // Sample every 4th frame for speed
+        let mut i = 0;
+        while i < count {
+            corr += flux[i] * flux[i + lag];
+            i += 4;
+        }
+        if corr > best_corr {
+            best_corr = corr;
+            best_lag = lag;
+        }
+    }
+
+    // Fine search around best
+    let fine_start = best_lag.saturating_sub(2);
+    let fine_end = (best_lag + 2).min(max_lag);
+    for lag in fine_start..=fine_end {
+        let count = count_max - lag;
+        let mut corr = 0.0f32;
         for i in 0..count {
             corr += flux[i] * flux[i + lag];
-            norm_a += flux[i] * flux[i];
-            norm_b += flux[i + lag] * flux[i + lag];
         }
-        let denom = (norm_a * norm_b).sqrt();
-        if denom > 1e-8 {
-            corr /= denom;
-        }
-        // Prefer lags that also correlate at double rate (reinforces real tempo)
-        let double_lag = lag * 2;
-        if double_lag < flux.len() / 2 {
-            let mut corr2 = 0.0f32;
-            let mut n2a = 0.0f32;
-            let mut n2b = 0.0f32;
-            let count2 = flux.len() - double_lag;
-            for i in 0..count2 {
-                corr2 += flux[i] * flux[i + double_lag];
-                n2a += flux[i] * flux[i];
-                n2b += flux[i + double_lag] * flux[i + double_lag];
-            }
-            let d2 = (n2a * n2b).sqrt();
-            if d2 > 1e-8 {
-                corr2 /= d2;
-            }
-            corr += corr2 * 0.3; // Bonus for double-period reinforcement
-        }
-
         if corr > best_corr {
             best_corr = corr;
             best_lag = lag;
@@ -74,7 +63,6 @@ fn build_beat_grid(
         return vec![0, total_samples];
     }
 
-    // Find the strongest onset to use as phase reference
     let mut best_frame = 0;
     let mut best_val = 0.0f32;
     for (i, &v) in flux.iter().enumerate() {
@@ -84,18 +72,14 @@ fn build_beat_grid(
         }
     }
 
-    // Build grid going backward from best_frame to 0, then forward to end
     let beat_period_samples = beat_period_frames * hop;
     let anchor = best_frame * hop;
 
     let mut grid = Vec::new();
-
-    // Go backward
     let mut pos = anchor as isize;
     while pos > 0 {
         pos -= beat_period_samples as isize;
     }
-    // Go forward from earliest
     pos = pos.max(0);
     while (pos as usize) < total_samples {
         grid.push(pos as usize);
@@ -115,8 +99,6 @@ fn build_beat_grid(
 }
 
 /// Snap detected onsets to the nearest beat grid position.
-/// Returns positions that are both musically meaningful (on-beat) and
-/// acoustically valid (near actual transients).
 fn quantize_onsets_to_grid(
     raw_onsets: &[usize],
     beat_grid: &[usize],
@@ -128,23 +110,19 @@ fn quantize_onsets_to_grid(
         return raw_onsets.to_vec();
     }
 
-    // For each beat grid position, check if there's a nearby onset.
-    // If so, use the grid position (snapped to zero crossing later).
-    // This ensures cuts always land on-beat.
-    let tolerance_samples = (sample_rate as f32 * 0.08) as usize; // 80ms tolerance
+    let tolerance_samples = (sample_rate as f32 * 0.08) as usize;
+    let global_mean: f32 = flux.iter().sum::<f32>() / flux.len().max(1) as f32;
 
     let mut result = Vec::new();
     result.push(0);
 
     for &grid_pos in &beat_grid[1..beat_grid.len() - 1] {
-        // Check if any raw onset is near this grid position
         let has_nearby_onset = raw_onsets.iter().any(|&o| {
             let diff = if o > grid_pos { o - grid_pos } else { grid_pos - o };
             diff < tolerance_samples
         });
 
         if has_nearby_onset {
-            // Also verify there's actual energy change here
             let frame_idx = (grid_pos / hop).min(flux.len().saturating_sub(1));
             let local_start = frame_idx.saturating_sub(3);
             let local_end = (frame_idx + 4).min(flux.len());
@@ -152,9 +130,7 @@ fn quantize_onsets_to_grid(
                 .iter()
                 .cloned()
                 .fold(0.0f32, f32::max);
-            let global_mean: f32 = flux.iter().sum::<f32>() / flux.len() as f32;
 
-            // Only include if there's meaningful energy at this beat
             if local_max > global_mean * 0.5 {
                 if let Some(&last) = result.last() {
                     if grid_pos > last + hop * 4 {
@@ -176,7 +152,6 @@ fn quantize_onsets_to_grid(
 }
 
 /// Compute a compact spectral fingerprint for a section of audio.
-/// Returns a vector of band energies that can be compared for similarity.
 pub fn spectral_fingerprint(samples: &[f32], sample_rate: u32) -> Vec<f32> {
     let n = 2048.min(samples.len());
     if n < 64 {
@@ -192,7 +167,6 @@ pub fn spectral_fingerprint(samples: &[f32], sample_rate: u32) -> Vec<f32> {
         .collect();
     fft.process(&mut buf);
 
-    // 8 mel-inspired bands
     let sr = sample_rate as f32;
     let band_edges = [0.0, 100.0, 300.0, 600.0, 1200.0, 2400.0, 5000.0, 10000.0, 20000.0];
     let mut energies = vec![0.0f32; 8];
@@ -210,7 +184,6 @@ pub fn spectral_fingerprint(samples: &[f32], sample_rate: u32) -> Vec<f32> {
         energies[band] = if count > 0 { sum / count as f32 } else { 0.0 };
     }
 
-    // Normalize
     let max_e = energies.iter().cloned().fold(0.001f32, f32::max);
     for e in energies.iter_mut() {
         *e /= max_e;
@@ -235,35 +208,36 @@ pub fn fingerprint_similarity(a: &[f32], b: &[f32]) -> f32 {
     if denom > 1e-8 { dot / denom } else { 0.0 }
 }
 
-/// Detect beat/section boundaries using spectral flux onset detection
+/// Detect beat/section boundaries using energy-based onset detection
 /// with tempo-aware beat grid quantization.
-/// Returns sample positions of detected onsets, snapped to beat grid and zero crossings.
+/// Uses RMS energy difference instead of STFT spectral flux for speed.
 pub fn detect_onsets(samples: &[f32], sample_rate: u32) -> Vec<usize> {
-    let fft_size = 1024;
     let hop = 512;
-    let frames = stft(samples, fft_size, hop);
-    if frames.len() < 2 {
+    let window = 1024;
+
+    if samples.len() < window * 2 {
         return vec![0, samples.len()];
     }
 
-    // Compute spectral flux (half-wave rectified magnitude difference)
-    let mut flux = Vec::with_capacity(frames.len());
-    flux.push(0.0f32);
-    for i in 1..frames.len() {
+    // Compute energy flux using RMS in short windows — no FFT needed
+    let num_frames = (samples.len() - window) / hop + 1;
+    let mut energy = Vec::with_capacity(num_frames);
+    for f in 0..num_frames {
+        let start = f * hop;
+        let end = (start + window).min(samples.len());
         let mut sum = 0.0f32;
-        for j in 0..fft_size / 2 {
-            let prev_mag = (frames[i - 1][j].re * frames[i - 1][j].re
-                + frames[i - 1][j].im * frames[i - 1][j].im)
-                .sqrt();
-            let curr_mag = (frames[i][j].re * frames[i][j].re
-                + frames[i][j].im * frames[i][j].im)
-                .sqrt();
-            let diff = curr_mag - prev_mag;
-            if diff > 0.0 {
-                sum += diff;
-            }
+        for i in start..end {
+            sum += samples[i] * samples[i];
         }
-        flux.push(sum);
+        energy.push((sum / (end - start) as f32).sqrt());
+    }
+
+    // Energy difference (half-wave rectified)
+    let mut flux = Vec::with_capacity(energy.len());
+    flux.push(0.0f32);
+    for i in 1..energy.len() {
+        let diff = energy[i] - energy[i - 1];
+        flux.push(if diff > 0.0 { diff } else { 0.0 });
     }
 
     // Estimate tempo from onset strength
@@ -278,7 +252,7 @@ pub fn detect_onsets(samples: &[f32], sample_rate: u32) -> Vec<usize> {
     let mut raw_onsets = Vec::new();
     raw_onsets.push(0usize);
 
-    for i in 1..flux.len() - 1 {
+    for i in 1..flux.len().saturating_sub(1) {
         let start = i.saturating_sub(window_size);
         let end = (i + window_size + 1).min(flux.len());
         let local_mean: f32 = flux[start..end].iter().sum::<f32>() / (end - start) as f32;
@@ -308,7 +282,6 @@ pub fn detect_onsets(samples: &[f32], sample_rate: u32) -> Vec<usize> {
         }
     }
 
-    // Ensure first and last
     if quantized.is_empty() || quantized[0] != 0 {
         quantized.insert(0, 0);
     }
@@ -318,10 +291,8 @@ pub fn detect_onsets(samples: &[f32], sample_rate: u32) -> Vec<usize> {
         }
     }
 
-    // Deduplicate
     quantized.dedup();
 
-    // Remove sections that are too small (< 50ms)
     let min_section = (sample_rate as f32 * 0.05) as usize;
     let mut filtered = vec![quantized[0]];
     for &pos in &quantized[1..] {

@@ -352,6 +352,7 @@ export function generateRandomConfig(): { config: ChainConfig; label: string } {
     fpDisrupt: fpDisrupt as ChainConfig['fpDisrupt'],
     stereoWiden: stereoWiden as ChainConfig['stereoWiden'],
     subBass: subBass as ChainConfig['subBass'],
+    deepen: null,
     tapeFlutter: tapeFlutter as ChainConfig['tapeFlutter'],
     seamlessLoop: false,
   };
@@ -363,6 +364,7 @@ export function generateRandomConfig(): { config: ChainConfig; label: string } {
       () => { if (!config.stereoWiden) { config.stereoWiden = { width: rand(1.1, 1.6) }; modActive++; } },
       () => { if (!config.tapeFlutter) { config.tapeFlutter = { rate: rand(1.0, 3.0), depth: rand(0.2, 0.5), mix: rand(0.4, 0.7) }; modActive++; } },
       () => { if (!config.subBass) { config.subBass = { amount: rand(0.3, 0.6), freq: rand(70, 120) }; modActive++; } },
+      () => { if (!config.deepen) { config.deepen = { amount: rand(0.3, 0.7), freq: rand(100, 300) }; modActive++; } },
       () => { if (!config.reverb) { config.reverb = { size: rand(0.3, 0.7), damping: rand(0.3, 0.7), mix: rand(0.15, 0.4) }; modActive++; } },
     ];
     // Shuffle fallbacks for variety
@@ -391,6 +393,7 @@ export function generateRandomConfig(): { config: ChainConfig; label: string } {
     const bonuses: Array<() => void> = [
       () => { if (!config.stereoWiden) config.stereoWiden = { width: rand(1.1, 1.4) }; },
       () => { if (!config.subBass) config.subBass = { amount: rand(0.2, 0.5), freq: rand(70, 110) }; },
+      () => { if (!config.deepen) config.deepen = { amount: rand(0.3, 0.6), freq: rand(100, 250) }; },
       () => { if (!config.tapeFlutter) config.tapeFlutter = { rate: rand(1.0, 2.5), depth: rand(0.15, 0.35), mix: rand(0.3, 0.5) }; },
       () => { if (!config.punch) config.punch = { attack: rand(0.3, 0.7), sustain: rand(0.1, 0.4) }; },
     ];

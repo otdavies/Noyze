@@ -47,6 +47,7 @@ interface ChainConfig {
   fpDisrupt: { strength: number } | null;
   stereoWiden: { width: number } | null;
   subBass: { amount: number; freq: number } | null;
+  deepen: { amount: number; freq: number } | null;
   tapeFlutter: { rate: number; depth: number; mix: number } | null;
   seamlessLoop: boolean;
 }

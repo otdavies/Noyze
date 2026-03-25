@@ -27,9 +27,6 @@ pub fn process_saturate(samples: &[f32], sample_rate: u32, drive_db: f32, warmth
     );
     let mut lpf = lpf_coeffs.ok().map(|c| DirectForm2Transposed::<f32>::new(c));
 
-    // Measure input peak for auto-normalization
-    let input_peak = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-
     // Process at 2x sample rate (reduces aliasing from tanh nonlinearity)
     let processed: Vec<f32> = upsampled
         .iter()
@@ -52,18 +49,7 @@ pub fn process_saturate(samples: &[f32], sample_rate: u32, drive_db: f32, warmth
         .collect();
 
     // --- Downsample back to original rate ---
-    let mut output = downsample_2x(&processed, sr);
-
-    // Auto-normalize output to match input peak level
-    let output_peak = output.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-    if output_peak > 1e-8 && input_peak > 1e-8 {
-        let ratio = input_peak / output_peak;
-        for s in output.iter_mut() {
-            *s *= ratio;
-        }
-    }
-
-    output
+    downsample_2x(&processed, sr)
 }
 
 /// 2x upsample using Rubato's FFT-based resampler

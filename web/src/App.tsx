@@ -42,6 +42,7 @@ export default function App() {
   const playDurationRef = useRef(0); // total duration of playing buffer
   const jobGenRef = useRef(0); // generation counter for cancelling stale results
   const isProcessingRef = useRef(false); // tracks worker busy state (ref, not render-dependent)
+  const processTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const createWorker = useCallback(() => {
     const worker = new Worker(
@@ -57,6 +58,7 @@ export default function App() {
       if (msg.type === 'progress') {
         setProgress(msg.value);
       } else if (msg.type === 'result') {
+        if (processTimeoutRef.current) { clearTimeout(processTimeoutRef.current); processTimeoutRef.current = null; }
         isProcessingRef.current = false;
         setProcessedAudio(msg.output);
         setProcessedChannels(msg.channels);
@@ -67,6 +69,7 @@ export default function App() {
         setIsFlashing(true);
         setTimeout(() => setIsFlashing(false), 400);
       } else if (msg.type === 'error') {
+        if (processTimeoutRef.current) { clearTimeout(processTimeoutRef.current); processTimeoutRef.current = null; }
         isProcessingRef.current = false;
         setIsProcessing(false);
         setErrorMessage(msg.message);
@@ -114,6 +117,18 @@ export default function App() {
     setIsProcessing(true);
     setProgress(0);
     setErrorMessage(null);
+
+    // Safety timeout — kill worker if processing takes over 60s
+    if (processTimeoutRef.current) clearTimeout(processTimeoutRef.current);
+    processTimeoutRef.current = setTimeout(() => {
+      if (isProcessingRef.current && workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = createWorker();
+        isProcessingRef.current = false;
+        setIsProcessing(false);
+        setErrorMessage('Processing timed out — try a shorter audio file or fewer effects');
+      }
+    }, 60000);
 
     const inputL = buffer.getChannelData(0);
     const inputR = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;

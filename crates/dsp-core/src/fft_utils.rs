@@ -55,14 +55,16 @@ pub fn stft(samples: &[f32], fft_size: usize, hop: usize) -> Vec<Vec<Complex32>>
     } else {
         0
     };
-    let mut frames = Vec::with_capacity(num_frames);
+    // Pre-allocate all frames at once to reduce allocator pressure
+    let mut frames: Vec<Vec<Complex32>> = (0..num_frames)
+        .map(|_| vec![Complex32::new(0.0, 0.0); fft_size])
+        .collect();
     let mut pos = 0usize;
-    while pos + fft_size <= samples.len() {
-        let mut buf: Vec<Complex32> = (0..fft_size)
-            .map(|i| Complex32::new(samples[pos + i] * window[i], 0.0))
-            .collect();
-        fft.process(&mut buf);
-        frames.push(buf);
+    for frame in frames.iter_mut() {
+        for i in 0..fft_size {
+            frame[i] = Complex32::new(samples[pos + i] * window[i], 0.0);
+        }
+        fft.process(frame);
         pos += hop;
     }
     frames

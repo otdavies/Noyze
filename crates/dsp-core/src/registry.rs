@@ -21,6 +21,7 @@ pub struct ChainConfig {
     pub warp: Option<WarpConfig>,
     pub ref_warp: Option<RefWarpConfig>,
     pub sub_bass: Option<SubBassConfig>,
+    pub deepen: Option<DeepenConfig>,
     pub tape_flutter: Option<TapeFlutterConfig>,
     // Mastering effects
     pub saturate: Option<SaturateConfig>,
@@ -38,7 +39,7 @@ impl ChainConfig {
     pub fn default_config() -> Self {
         Self {
             beats: None, reshape: None, reverb: None, warp: None,
-            ref_warp: None, sub_bass: None, tape_flutter: None,
+            ref_warp: None, sub_bass: None, deepen: None, tape_flutter: None,
             saturate: None, excite: None, punch: None,
             auto_eq: None, fp_disrupt: None, stereo_widen: None,
             seamless_loop: false,
@@ -88,6 +89,10 @@ pub fn process_mono_chain(
 
     if let Some(ref cfg) = config.sub_bass {
         buf = effects::sub_bass::process_sub_bass(&buf, sr, cfg.amount, cfg.freq);
+    }
+
+    if let Some(ref cfg) = config.deepen {
+        buf = effects::deepen::process_deepen(&buf, sr, cfg.amount, cfg.freq);
     }
 
     if let Some(ref cfg) = config.tape_flutter {
@@ -184,6 +189,10 @@ pub fn process_fx_chunk(
 
     if let Some(ref cfg) = config.sub_bass {
         buf = effects::sub_bass::process_sub_bass(&buf, sr, cfg.amount, cfg.freq);
+    }
+
+    if let Some(ref cfg) = config.deepen {
+        buf = effects::deepen::process_deepen(&buf, sr, cfg.amount, cfg.freq);
     }
 
     if let Some(ref cfg) = config.tape_flutter {

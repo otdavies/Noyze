@@ -111,6 +111,17 @@ export const EFFECT_REGISTRY: EffectDef[] = [
     ],
   },
   {
+    id: 'deepen',
+    label: 'DEEPEN',
+    category: 'modifying',
+    defaults: { amount: 0.5, freq: 200 },
+    description: 'Low-shelf bass boost for a deeper, weightier sound',
+    params: [
+      { key: 'amount', type: 'slider', label: 'amount', min: 0, max: 1, defaultValue: 0.5 },
+      { key: 'freq', type: 'slider', label: 'freq', min: 40, max: 500, step: 10, unit: ' Hz', defaultValue: 200 },
+    ],
+  },
+  {
     id: 'tapeFlutter',
     label: 'TAPE FLUTTER',
     category: 'modifying',

@@ -89,15 +89,5 @@ pub fn process_tape_flutter(
         }
     }
 
-    // Auto-normalize
-    let in_peak = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-    let out_peak = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-    if out_peak > 1e-8 && in_peak > 1e-8 {
-        let ratio = in_peak / out_peak;
-        for s in out.iter_mut() {
-            *s *= ratio;
-        }
-    }
-
     out
 }

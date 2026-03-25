@@ -49,20 +49,5 @@ pub fn process_stereo_widen(
         out_r[i] = mid[i] - side[i];
     }
 
-    // Auto-normalize to match input peak
-    let in_peak = samples_l.iter().chain(samples_r.iter())
-        .map(|s| s.abs())
-        .fold(0.0f32, f32::max);
-    let out_peak = out_l.iter().chain(out_r.iter())
-        .map(|s| s.abs())
-        .fold(0.0f32, f32::max);
-    if out_peak > 1e-8 && in_peak > 1e-8 {
-        let ratio = in_peak / out_peak;
-        for i in 0..n {
-            out_l[i] *= ratio;
-            out_r[i] *= ratio;
-        }
-    }
-
     (out_l, out_r)
 }

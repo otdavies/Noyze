@@ -66,19 +66,9 @@ pub fn process_sub_bass(
 
     // Mix: original + sub harmonics
     let sub_gain = amount * 0.5;
-    let mut out: Vec<f32> = samples.iter().enumerate()
+    let out: Vec<f32> = samples.iter().enumerate()
         .map(|(i, &s)| s + sub_smooth[i] * sub_gain)
         .collect();
-
-    // Auto-normalize to prevent clipping
-    let in_peak = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-    let out_peak = out.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-    if out_peak > 1e-8 && in_peak > 1e-8 {
-        let ratio = in_peak / out_peak;
-        for s in out.iter_mut() {
-            *s *= ratio;
-        }
-    }
 
     out
 }

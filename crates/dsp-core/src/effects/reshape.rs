@@ -9,17 +9,15 @@ use crate::fft_utils::{stft, istft};
 use rustfft::num_complex::Complex32;
 
 pub fn process_reshape(samples: &[f32], sample_rate: u32, spread: f32, center: f32) -> Vec<f32> {
-    let fft_size = 4096;
-    let hop = fft_size / 2; // 50% overlap (was 25% — halves frame count)
+    let fft_size = 2048;
+    let hop = fft_size / 2;
     let mut frames = stft(samples, fft_size, hop);
     let half = fft_size / 2 + 1;
 
-    // Center bin for asymmetric warping
     let center_bin = (center / (sample_rate as f32 / fft_size as f32)).round() as usize;
     let center_bin = center_bin.clamp(1, half - 1);
 
-    // Smoothing kernel radius (~30 bins ≈ same resolution as cepstral lifter_bin=30)
-    let smooth_radius: usize = 30;
+    let smooth_radius: usize = 15;
 
     // Reusable buffers (allocated once)
     let mut log_mag = vec![0.0f32; half];
@@ -66,7 +64,7 @@ pub fn process_reshape(samples: &[f32], sample_rate: u32, spread: f32, center: f
 
         // Apply gain ratio
         for i in 0..half {
-            let gain = (target_envelope[i] - envelope[i]).clamp(-4.0, 4.0);
+            let gain = (target_envelope[i] - envelope[i]).clamp(-2.5, 2.5);
             let multiplier = gain.exp();
             frame[i] = Complex32::new(frame[i].re * multiplier, frame[i].im * multiplier);
             if i > 0 && i < fft_size / 2 {

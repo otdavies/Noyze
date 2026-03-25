@@ -66,6 +66,11 @@ export interface TapeFlutterConfig {
   mix: number;
 }
 
+export interface DeepenConfig {
+  amount: number;
+  freq: number;
+}
+
 export interface ChainConfig {
   beats: BeatsConfig | null;
   reshape: ReshapeConfig | null;
@@ -79,6 +84,7 @@ export interface ChainConfig {
   fpDisrupt: FpDisruptConfig | null;
   stereoWiden: StereoWidenConfig | null;
   subBass: SubBassConfig | null;
+  deepen: DeepenConfig | null;
   tapeFlutter: TapeFlutterConfig | null;
   seamlessLoop: boolean;
 }
@@ -106,6 +112,7 @@ export function defaultConfig(): ChainConfig {
     fpDisrupt: null,
     stereoWiden: null,
     subBass: null,
+    deepen: null,
     tapeFlutter: null,
     seamlessLoop: false,
   };

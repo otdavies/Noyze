@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls:*)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:lib.rs)",
+      "Bash(wasm-pack build:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm test:*)"
+    ]
+  }
+}

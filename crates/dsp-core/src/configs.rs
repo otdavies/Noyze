@@ -84,3 +84,9 @@ pub struct TapeFlutterConfig {
     pub depth: f32,
     pub mix: f32,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct DeepenConfig {
+    pub amount: f32,
+    pub freq: f32,
+}

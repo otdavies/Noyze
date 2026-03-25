@@ -12,3 +12,4 @@ pub mod loop_maker;
 pub mod stereo_widen;
 pub mod sub_bass;
 pub mod tape_flutter;
+pub mod deepen;
