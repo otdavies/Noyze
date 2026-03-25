@@ -24,6 +24,14 @@ pub fn process_tape_flutter(
     let mut delay_buf = vec![0.0f32; buf_size * 2];
     let mut write_pos = 0usize;
 
+    // Pre-fill the delay buffer with the first sample to avoid leading silence
+    // (otherwise reads before enough samples are written return zero)
+    if !samples.is_empty() {
+        for s in delay_buf.iter_mut() {
+            *s = samples[0];
+        }
+    }
+
     // Use multiple LFO rates for natural-sounding flutter
     // Real tape has both wow (slow, ~0.5-2Hz) and flutter (fast, ~4-10Hz)
     let lfo1_rate = rate;

@@ -94,9 +94,16 @@ pub fn istft(frames: &[Vec<Complex32>], fft_size: usize, hop: usize, output_len:
             }
         }
     }
+    // Clamp norm minimum so boundary samples (where the Hann window
+    // overlap is thin) don't stay silent or near-silent.
+    let min_norm = {
+        // The steady-state norm for 50% overlap Hann is ~0.5.
+        // Use half of that as the floor so boundaries get reasonable gain.
+        0.25f32
+    };
     for i in 0..total {
         if norm[i] > 1e-8 {
-            output[i] /= norm[i];
+            output[i] /= norm[i].max(min_norm);
         }
     }
     output

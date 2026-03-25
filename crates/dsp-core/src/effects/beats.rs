@@ -211,6 +211,12 @@ pub fn process_beats(
     let fade_samples = (sample_rate as f32 * 0.015) as usize; // 15ms crossfade
     let mut output: Vec<f32> = Vec::with_capacity(samples.len());
 
+    // Preserve samples before the first onset (intro/silence/pickup)
+    let first_onset = onsets[0];
+    if first_onset > 0 {
+        output.extend_from_slice(&samples[..first_onset]);
+    }
+
     for &beat_idx in &order {
         let (start, end) = beat_ranges[beat_idx];
         let beat = &samples[start..end];
@@ -237,6 +243,12 @@ pub fn process_beats(
         };
 
         crossfade_splice(&mut output, &beat_output, fade_samples);
+    }
+
+    // Preserve samples after the last onset's beat range
+    let last_end = beat_ranges[beat_ranges.len() - 1].1;
+    if last_end < samples.len() {
+        crossfade_splice(&mut output, &samples[last_end..], fade_samples);
     }
 
     output
