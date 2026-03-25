@@ -22,13 +22,15 @@ export default function App() {
   const [vibeLabel, setVibeLabel] = useState<string | null>(null);
   const [isLooping, setIsLooping] = useState(false);
   const [isPlaying, setIsPlaying] = useState<'original' | 'processed' | null>(null);
+  const [activeTrack, setActiveTrack] = useState<'original' | 'processed'>('processed');
   const [fileName, setFileName] = useState<string | null>(null);
   const [refFileName, setRefFileName] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [playbackPosition, setPlaybackPosition] = useState(0);
   const [isFlashing, setIsFlashing] = useState(false);
-  const [seekPosition, setSeekPosition] = useState(0); // 0-1, where playback should start
+  const [seekPosition, setSeekPosition] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [shouldAutoPlay, setShouldAutoPlay] = useState(false);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -38,10 +40,10 @@ export default function App() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const playStartTimeRef = useRef(0);
-  const playOffsetRef = useRef(0); // offset in seconds where playback started
-  const playDurationRef = useRef(0); // total duration of playing buffer
-  const jobGenRef = useRef(0); // generation counter for cancelling stale results
-  const isProcessingRef = useRef(false); // tracks worker busy state (ref, not render-dependent)
+  const playOffsetRef = useRef(0);
+  const playDurationRef = useRef(0);
+  const jobGenRef = useRef(0);
+  const isProcessingRef = useRef(false);
   const processTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const createWorker = useCallback(() => {
@@ -51,9 +53,7 @@ export default function App() {
     );
     worker.onmessage = (e: MessageEvent) => {
       const msg = e.data;
-      // 'ready' has no _gen — let it through silently
       if (msg.type === 'ready') return;
-      // Ignore results from stale jobs
       if (msg._gen !== undefined && msg._gen !== jobGenRef.current) return;
       if (msg.type === 'progress') {
         setProgress(msg.value);
@@ -65,6 +65,7 @@ export default function App() {
         setProcessedSampleRate(msg.sampleRate);
         setIsProcessing(false);
         setProgress(0);
+        setShouldAutoPlay(true);
 
         setIsFlashing(true);
         setTimeout(() => setIsFlashing(false), 400);
@@ -98,12 +99,8 @@ export default function App() {
   const processAudio = useCallback((config: ChainConfig, buffer: AudioBuffer | null, ref: AudioBuffer | null) => {
     if (!buffer) return;
 
-    // Bump generation to invalidate any in-flight results
     const gen = ++jobGenRef.current;
 
-    // If the worker is still processing a previous job, kill it and start fresh.
-    // WASM processing is synchronous inside the worker so messages just queue up —
-    // terminating is the only way to truly cancel.
     if (isProcessingRef.current && workerRef.current) {
       workerRef.current.terminate();
       workerRef.current = createWorker();
@@ -118,7 +115,6 @@ export default function App() {
     setProgress(0);
     setErrorMessage(null);
 
-    // Safety timeout — kill worker if processing takes over 60s
     if (processTimeoutRef.current) clearTimeout(processTimeoutRef.current);
     processTimeoutRef.current = setTimeout(() => {
       if (isProcessingRef.current && workerRef.current) {
@@ -163,6 +159,7 @@ export default function App() {
       setProcessedAudio(null);
       setSeekPosition(0);
       setPlaybackPosition(0);
+      setActiveTrack('processed');
     } catch { console.error('Failed to decode audio file'); }
   }, [decodeFile]);
 
@@ -185,14 +182,13 @@ export default function App() {
   const updatePlaybackPosition = useCallback(() => {
     const ctx = audioCtxRef.current;
     const source = sourceRef.current;
-    if (!ctx || !source) return; // Don't reset position — just stop animating
+    if (!ctx || !source) return;
 
     const elapsed = ctx.currentTime - playStartTimeRef.current + playOffsetRef.current;
     const duration = playDurationRef.current;
     if (duration > 0) {
       const pos = elapsed / duration;
       if (pos >= 1 && !source.loop) {
-        // Playback ended naturally — onended will handle state cleanup
         return;
       }
       setPlaybackPosition(pos % 1);
@@ -200,7 +196,6 @@ export default function App() {
     animFrameRef.current = requestAnimationFrame(updatePlaybackPosition);
   }, []);
 
-  // Internal: tear down audio source without touching React state
   const teardownSource = useCallback(() => {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
@@ -219,7 +214,6 @@ export default function App() {
   }, [teardownSource]);
 
   const playBuffer = useCallback((buffer: AudioBuffer, loop: boolean, which: 'original' | 'processed', startPosition = 0) => {
-    // Tear down old source WITHOUT setting isPlaying=null (avoids flicker)
     teardownSource();
 
     const ctx = getAudioCtx();
@@ -233,9 +227,8 @@ export default function App() {
     playOffsetRef.current = offsetSeconds;
     playDurationRef.current = buffer.duration;
 
-    // Guard onended against stale sources — only act if THIS source is still current
     source.onended = () => {
-      if (sourceRef.current !== source) return; // Stale — a new source replaced us
+      if (sourceRef.current !== source) return;
       if (!loop) {
         sourceRef.current = null;
         setIsPlaying(null);
@@ -249,7 +242,6 @@ export default function App() {
 
     source.start(0, offsetSeconds);
     sourceRef.current = source;
-    // Set state atomically — no intermediate null
     setIsPlaying(which);
     animFrameRef.current = requestAnimationFrame(updatePlaybackPosition);
   }, [getAudioCtx, teardownSource, updatePlaybackPosition]);
@@ -268,27 +260,54 @@ export default function App() {
     return abuf;
   }, [processedAudio, processedChannels, processedSampleRate, getAudioCtx]);
 
-  const handlePlayOriginal = useCallback(() => {
-    if (!audioBuffer) return;
-    playBuffer(audioBuffer, false, 'original', seekPosition);
-  }, [audioBuffer, playBuffer, seekPosition]);
-
-  const handlePlayProcessed = useCallback(() => {
-    const abuf = makeProcessedBuffer();
-    if (!abuf) return;
-    playBuffer(abuf, isLooping, 'processed', seekPosition);
-  }, [makeProcessedBuffer, isLooping, playBuffer, seekPosition]);
-
-  // Auto-resume after reprocessing
+  // Auto-play processed audio when processing finishes
   useEffect(() => {
-    if (processedAudio && seekPosition > 0 && isPlaying === 'processed') {
-      // Re-trigger playback from stored position
-      const abuf = makeProcessedBuffer();
-      if (abuf) {
-        playBuffer(abuf, isLooping, 'processed', seekPosition);
+    if (!shouldAutoPlay || !processedAudio) return;
+    setShouldAutoPlay(false);
+    setActiveTrack('processed');
+    const abuf = makeProcessedBuffer();
+    if (abuf) {
+      playBuffer(abuf, isLooping, 'processed', seekPosition);
+    }
+  }, [shouldAutoPlay, processedAudio]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Play/pause toggle
+  const handlePlayPause = useCallback(() => {
+    if (isPlaying) {
+      stopPlayback();
+    } else {
+      if (activeTrack === 'processed') {
+        const abuf = makeProcessedBuffer();
+        if (abuf) {
+          playBuffer(abuf, isLooping, 'processed', seekPosition);
+        } else if (audioBuffer) {
+          // No processed audio yet, play original
+          playBuffer(audioBuffer, false, 'original', seekPosition);
+          setActiveTrack('original');
+        }
+      } else {
+        if (audioBuffer) {
+          playBuffer(audioBuffer, false, 'original', seekPosition);
+        }
       }
     }
-  }, [processedAudio]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isPlaying, activeTrack, stopPlayback, makeProcessedBuffer, audioBuffer, isLooping, playBuffer, seekPosition]);
+
+  // A/B toggle
+  const handleToggleTrack = useCallback(() => {
+    const next = activeTrack === 'original' ? 'processed' : 'original';
+    setActiveTrack(next);
+    if (isPlaying) {
+      if (next === 'processed') {
+        const abuf = makeProcessedBuffer();
+        if (abuf) {
+          playBuffer(abuf, isLooping, 'processed', seekPosition);
+        }
+      } else if (audioBuffer) {
+        playBuffer(audioBuffer, false, 'original', seekPosition);
+      }
+    }
+  }, [activeTrack, isPlaying, makeProcessedBuffer, audioBuffer, isLooping, playBuffer, seekPosition]);
 
   const handleExport = useCallback(() => {
     if (!processedAudio) return;
@@ -326,7 +345,6 @@ export default function App() {
   const handleSeek = useCallback((position: number) => {
     setSeekPosition(position);
 
-    // If currently playing, restart from new position
     if (isPlaying === 'original' && audioBuffer) {
       playBuffer(audioBuffer, false, 'original', position);
     } else if (isPlaying === 'processed') {
@@ -335,7 +353,6 @@ export default function App() {
         playBuffer(abuf, isLooping, 'processed', position);
       }
     } else {
-      // Not playing, just show the position
       setPlaybackPosition(position);
     }
   }, [isPlaying, audioBuffer, isLooping, playBuffer, makeProcessedBuffer]);
@@ -370,7 +387,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-gray-950 text-gray-200 font-mono p-4 max-w-2xl mx-auto space-y-4"
+      className="min-h-screen bg-gray-950 text-gray-200 font-mono p-4 max-w-2xl mx-auto space-y-3"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -386,9 +403,9 @@ export default function App() {
         </button>
         <button
           onClick={() => refInputRef.current?.click()}
-          className="px-3 py-1.5 rounded text-xs font-medium bg-gray-800 text-gray-300 hover:bg-gray-700 transition-colors border border-gray-700"
+          className="px-3 py-1.5 rounded text-xs font-medium bg-gray-800 text-gray-500 hover:text-gray-300 hover:bg-gray-700 transition-colors border border-gray-700"
         >
-          Load Reference
+          Ref
         </button>
         <input ref={fileInputRef} type="file" accept="audio/*" className="hidden"
           onChange={e => { const f = e.target.files?.[0]; if (f) handleFileLoad(f); }} />
@@ -398,60 +415,16 @@ export default function App() {
 
       {(fileName || refFileName) && (
         <div className="flex items-center gap-4 text-[10px] text-gray-500">
-          {fileName && <span>Audio: {fileName}</span>}
-          {refFileName && <span className="text-blue-400">Ref: {refFileName}</span>}
+          {fileName && <span>{fileName}</span>}
+          {refFileName && <span className="text-blue-400">ref: {refFileName}</span>}
         </div>
       )}
 
-      {/* Randomizer */}
-      <Randomizer
-        onRandomize={handleRandomize}
-        onReset={handleReset}
-        onToggleLoop={handleToggleLoop}
-        isLooping={isLooping}
-      />
-
-      {/* Preset Bar */}
-      <PresetBar config={chainConfig} onLoadPreset={handleLoadPreset} />
-
-      {/* Status line */}
-      <div className="flex items-center gap-2 flex-wrap min-h-[24px]">
-        {vibeLabel && <span className="text-xs text-gray-400">{vibeLabel}</span>}
-        {isProcessing && (
-          <span className="text-xs text-yellow-500 animate-pulse">
-            Processing... {Math.round(progress * 100)}%
-          </span>
-        )}
-        <div className="flex-1" />
-        {activeModLabels.map(k => (
-          <span key={k} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
-            {String(k).toUpperCase()}
-          </span>
-        ))}
-        {activeMasLabels.map(k => (
-          <span key={k} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
-            {String(k).toUpperCase()}
-          </span>
-        ))}
-      </div>
-
-      {/* Error banner */}
-      {errorMessage && (
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
-          <span className="text-xs text-red-400 flex-1">{errorMessage}</span>
-          <button
-            onClick={() => setErrorMessage(null)}
-            className="text-red-400 hover:text-red-300 text-xs"
-          >
-            dismiss
-          </button>
-        </div>
-      )}
-
-      {/* Drop zone hint when no audio */}
+      {/* Drop zone when no audio loaded */}
       {!audioBuffer && (
-        <div className="border-2 border-dashed border-gray-800 rounded-lg p-8 text-center">
-          <p className="text-gray-600 text-sm">Drop an audio file here or click Load Audio</p>
+        <div className="border-2 border-dashed border-gray-800 rounded-lg p-12 text-center space-y-2">
+          <p className="text-gray-500 text-sm">Drop an audio file here to get started</p>
+          <p className="text-gray-600 text-xs">or click Load Audio above</p>
         </div>
       )}
 
@@ -466,18 +439,71 @@ export default function App() {
         onSeek={handleSeek}
       />
 
+      {/* Progress bar */}
+      {isProcessing && (
+        <div className="h-1 bg-gray-800 rounded-full overflow-hidden -mt-2">
+          <div
+            className="h-full bg-gradient-to-r from-teal-500 to-cyan-400 transition-all duration-200 ease-out"
+            style={{ width: `${Math.max(progress * 100, 2)}%` }}
+          />
+        </div>
+      )}
+
       {/* Transport */}
       <Transport
         hasOriginal={!!audioBuffer}
         hasProcessed={!!processedAudio}
         isLooping={isLooping}
         isPlaying={isPlaying}
-        onPlayOriginal={handlePlayOriginal}
-        onPlayProcessed={handlePlayProcessed}
-        onStop={stopPlayback}
+        activeTrack={activeTrack}
+        onPlayPause={handlePlayPause}
+        onToggleTrack={handleToggleTrack}
         onExport={handleExport}
         onRestart={handleRestart}
+        onToggleLoop={handleToggleLoop}
       />
+
+      {/* Error banner */}
+      {errorMessage && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30">
+          <span className="text-xs text-red-400 flex-1">{errorMessage}</span>
+          <button
+            onClick={() => setErrorMessage(null)}
+            className="text-red-400 hover:text-red-300 text-xs"
+          >
+            dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Randomizer + status */}
+      <div className="space-y-2">
+        <Randomizer
+          onRandomize={handleRandomize}
+          onReset={handleReset}
+          onToggleLoop={handleToggleLoop}
+          isLooping={isLooping}
+        />
+
+        {/* Active effects + vibe label */}
+        <div className="flex items-center gap-2 flex-wrap min-h-[20px]">
+          {vibeLabel && <span className="text-xs text-gray-500">{vibeLabel}</span>}
+          <div className="flex-1" />
+          {activeModLabels.map(k => (
+            <span key={k} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
+              {String(k).toUpperCase()}
+            </span>
+          ))}
+          {activeMasLabels.map(k => (
+            <span key={k} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
+              {String(k).toUpperCase()}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Preset Bar */}
+      <PresetBar config={chainConfig} onLoadPreset={handleLoadPreset} />
 
       {/* Effect Controls */}
       <EffectControls

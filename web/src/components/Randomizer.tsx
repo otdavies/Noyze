@@ -4,8 +4,8 @@ import type { ChainConfig } from '../dsp/types';
 interface RandomizerProps {
   onRandomize: (config: ChainConfig, label: string) => void;
   onReset: () => void;
-  onToggleLoop: () => void;
-  isLooping: boolean;
+  onToggleLoop?: () => void;
+  isLooping?: boolean;
 }
 
 type VibeKey =
@@ -28,7 +28,7 @@ interface VibeDef {
 
 const VIBES: Record<VibeKey, VibeDef> = {
   polished_shift: {
-    displayName: 'Polished Shift',
+    displayName: 'Clean Mix',
     partners: ['ghost_touch', 'punch_up', 'warm_tape', 'crystal_air', 'neon_bounce'],
     modifying: {
       reshape: { activation: 0.9, params: { spread: [1.0, 2.0], center: [500, 2000] } },
@@ -42,12 +42,13 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   warm_tape: {
-    displayName: 'Warm Tape',
+    displayName: 'Tape Warmth',
     partners: ['polished_shift', 'dream_hall', 'section_rework', 'lo_fi_haze', 'vinyl_crackle'],
     modifying: {
       reshape: { activation: 0.6, params: { spread: [0.8, 1.5], center: [400, 1500] } },
       reverb: { activation: 0.5, params: { size: [0.2, 0.5], damping: [0.4, 0.8], mix: [0.1, 0.3] } },
       tapeFlutter: { activation: 0.8, params: { rate: [1.0, 3.0], depth: [0.2, 0.5], mix: [0.4, 0.7] } },
+      deepen: { activation: 0.5, params: { amount: [0.3, 0.6], freq: [120, 280] } },
     },
     mastering: {
       saturate: { activation: 0.9, params: { drive: [4, 16], warmth: [0.5, 0.9] } },
@@ -55,7 +56,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   section_rework: {
-    displayName: 'Section Rework',
+    displayName: 'Chop & Rework',
     partners: ['punch_up', 'ghost_touch', 'polished_shift', 'neon_bounce', 'subterranean'],
     modifying: {
       beats: { activation: 0.85, params: { reverseProb: [0.1, 0.4] } },
@@ -68,7 +69,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   punch_up: {
-    displayName: 'Punch Up',
+    displayName: 'More Punch',
     partners: ['warm_tape', 'polished_shift', 'section_rework', 'subterranean', 'neon_bounce'],
     modifying: {
       reshape: { activation: 0.4, params: { spread: [1.0, 1.8], center: [500, 2000] } },
@@ -81,7 +82,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   dream_hall: {
-    displayName: 'Dream Hall',
+    displayName: 'Big Room',
     partners: ['ghost_touch', 'warm_tape', 'polished_shift', 'deep_space', 'crystal_air'],
     modifying: {
       reverb: { activation: 0.95, params: { size: [0.6, 1.0], damping: [0.2, 0.6], mix: [0.3, 0.6] } },
@@ -95,7 +96,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   ghost_touch: {
-    displayName: 'Ghost Touch',
+    displayName: 'Subtle Touch',
     partners: ['polished_shift', 'warm_tape', 'punch_up', 'lo_fi_haze', 'deep_space'],
     modifying: {
       reshape: { activation: 0.7, params: { spread: [0.7, 1.2], center: [500, 2000] } },
@@ -108,7 +109,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   cinematic_slow: {
-    displayName: 'Cinematic Slow',
+    displayName: 'Slow & Heavy',
     partners: ['dream_hall', 'warm_tape', 'ghost_touch', 'deep_space', 'lo_fi_haze'],
     modifying: {
       beats: { activation: 0.7, params: { reverseProb: [0.1, 0.3] } },
@@ -125,12 +126,13 @@ const VIBES: Record<VibeKey, VibeDef> = {
   // === NEW VIBES ===
 
   lo_fi_haze: {
-    displayName: 'Lo-Fi Haze',
+    displayName: 'Lo-Fi',
     partners: ['warm_tape', 'ghost_touch', 'cinematic_slow', 'vinyl_crackle', 'dream_hall'],
     modifying: {
       tapeFlutter: { activation: 0.9, params: { rate: [1.5, 4.0], depth: [0.3, 0.7], mix: [0.5, 0.8] } },
       reverb: { activation: 0.6, params: { size: [0.3, 0.6], damping: [0.6, 0.9], mix: [0.15, 0.35] } },
       reshape: { activation: 0.5, params: { spread: [0.7, 1.2], center: [300, 1200] } },
+      deepen: { activation: 0.6, params: { amount: [0.3, 0.7], freq: [100, 250] } },
     },
     mastering: {
       saturate: { activation: 0.85, params: { drive: [6, 18], warmth: [0.6, 1.0] } },
@@ -138,7 +140,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   crystal_air: {
-    displayName: 'Crystal Air',
+    displayName: 'Bright & Airy',
     partners: ['polished_shift', 'dream_hall', 'punch_up', 'neon_bounce', 'deep_space'],
     modifying: {
       stereoWiden: { activation: 0.85, params: { width: [1.3, 1.9] } },
@@ -152,13 +154,14 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   deep_space: {
-    displayName: 'Deep Space',
+    displayName: 'Deep & Spacey',
     partners: ['dream_hall', 'cinematic_slow', 'ghost_touch', 'crystal_air', 'subterranean'],
     modifying: {
       reverb: { activation: 0.95, params: { size: [0.8, 1.0], damping: [0.05, 0.3], mix: [0.4, 0.7] } },
       stereoWiden: { activation: 0.8, params: { width: [1.5, 2.0] } },
       warp: { activation: 0.5, params: { rate: [0.6, 0.85], grainMs: [120, 200] } },
       tapeFlutter: { activation: 0.4, params: { rate: [0.5, 1.5], depth: [0.15, 0.35], mix: [0.3, 0.5] } },
+      deepen: { activation: 0.55, params: { amount: [0.3, 0.6], freq: [80, 200] } },
     },
     mastering: {
       saturate: { activation: 0.3, params: { drive: [2, 5], warmth: [0.4, 0.7] } },
@@ -166,7 +169,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   vinyl_crackle: {
-    displayName: 'Vinyl Crackle',
+    displayName: 'Vinyl Grit',
     partners: ['warm_tape', 'lo_fi_haze', 'ghost_touch', 'cinematic_slow', 'punch_up'],
     modifying: {
       tapeFlutter: { activation: 0.85, params: { rate: [0.8, 2.5], depth: [0.2, 0.5], mix: [0.4, 0.7] } },
@@ -180,7 +183,7 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   neon_bounce: {
-    displayName: 'Neon Bounce',
+    displayName: 'Bouncy',
     partners: ['punch_up', 'section_rework', 'polished_shift', 'crystal_air', 'subterranean'],
     modifying: {
       beats: { activation: 0.8, params: { reverseProb: [0.05, 0.2] } },
@@ -195,10 +198,11 @@ const VIBES: Record<VibeKey, VibeDef> = {
     },
   },
   subterranean: {
-    displayName: 'Subterranean',
+    displayName: 'Heavy Bass',
     partners: ['punch_up', 'deep_space', 'section_rework', 'neon_bounce', 'warm_tape'],
     modifying: {
       subBass: { activation: 0.95, params: { amount: [0.5, 1.0], freq: [60, 120] } },
+      deepen: { activation: 0.8, params: { amount: [0.5, 0.9], freq: [100, 300] } },
       reverb: { activation: 0.5, params: { size: [0.4, 0.7], damping: [0.5, 0.8], mix: [0.15, 0.3] } },
       reshape: { activation: 0.4, params: { spread: [0.8, 1.4], center: [200, 800] } },
       warp: { activation: 0.3, params: { rate: [0.85, 1.0], grainMs: [60, 140] } },
@@ -321,6 +325,7 @@ export function generateRandomConfig(): { config: ChainConfig; label: string } {
   const reverb = mod.reverb ? tryBuild('reverb', mod.reverb) : null;
   const warp = mod.warp ? tryBuild('warp', mod.warp) : null;
   const subBass = mod.subBass ? tryBuild('subBass', mod.subBass) : null;
+  const deepen = mod.deepen ? tryBuild('deepen', mod.deepen) : null;
   const tapeFlutter = mod.tapeFlutter ? tryBuild('tapeFlutter', mod.tapeFlutter) : null;
   const stereoWiden = mod.stereoWiden ? tryBuild('stereoWiden', mod.stereoWiden) : null;
 
@@ -333,7 +338,7 @@ export function generateRandomConfig(): { config: ChainConfig; label: string } {
   const fpDisrupt = mas.fpDisrupt ? tryBuild('fpDisrupt', mas.fpDisrupt) : null;
 
   // Count active
-  const modEffects = [beats, reshape, reverb, warp, subBass, tapeFlutter, stereoWiden];
+  const modEffects = [beats, reshape, reverb, warp, subBass, deepen, tapeFlutter, stereoWiden];
   const masEffects = [saturate, excite, punch, autoEq];
   let modActive = modEffects.filter(Boolean).length;
   let masActive = masEffects.filter(Boolean).length;
@@ -352,7 +357,7 @@ export function generateRandomConfig(): { config: ChainConfig; label: string } {
     fpDisrupt: fpDisrupt as ChainConfig['fpDisrupt'],
     stereoWiden: stereoWiden as ChainConfig['stereoWiden'],
     subBass: subBass as ChainConfig['subBass'],
-    deepen: null,
+    deepen: deepen as ChainConfig['deepen'],
     tapeFlutter: tapeFlutter as ChainConfig['tapeFlutter'],
     seamlessLoop: false,
   };
@@ -400,53 +405,35 @@ export function generateRandomConfig(): { config: ChainConfig; label: string } {
     pick(bonuses)();
   }
 
-  const label = `${primary.displayName} / ${partner.displayName} -- ${pctP}/${100 - pctP} blend`;
+  const label = `${primary.displayName} + ${partner.displayName}`;
   return { config, label };
 }
 
-export function Randomizer({ onRandomize, onReset, onToggleLoop, isLooping }: RandomizerProps) {
-  const [currentLabel, setCurrentLabel] = useState<string | null>(null);
-
+export function Randomizer({ onRandomize, onReset }: RandomizerProps) {
   const handleRandomize = () => {
     const { config, label } = generateRandomConfig();
-    setCurrentLabel(label);
     onRandomize(config, label);
   };
 
   return (
-    <div className="space-y-2">
+    <div className="flex items-center gap-2">
       <button
         onClick={handleRandomize}
-        className="w-full py-3 rounded-lg font-bold text-sm tracking-widest
+        className="flex-1 py-2.5 rounded-lg font-bold text-sm tracking-widest
                    bg-gradient-to-r from-teal-600 to-cyan-500
                    hover:from-teal-500 hover:to-cyan-400
                    text-white transition-all active:scale-[0.98]"
       >
         RANDOMIZE
       </button>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={onToggleLoop}
-          className={`px-4 py-1.5 rounded-full text-xs font-medium transition-colors ${
-            isLooping
-              ? 'bg-teal-500/20 text-teal-400 border border-teal-500/40'
-              : 'bg-gray-800 text-gray-500 border border-gray-700'
-          }`}
-        >
-          LOOP
-        </button>
-        <button
-          onClick={() => { setCurrentLabel(null); onReset(); }}
-          className="px-4 py-1.5 rounded-full text-xs font-medium
-                     bg-gray-800 text-gray-500 border border-gray-700
-                     hover:text-gray-300 hover:border-gray-600 transition-colors"
-        >
-          RESET
-        </button>
-        {currentLabel && (
-          <span className="ml-2 text-xs text-gray-500 truncate">{currentLabel}</span>
-        )}
-      </div>
+      <button
+        onClick={onReset}
+        className="px-4 py-2.5 rounded-lg text-xs font-medium
+                   bg-gray-800 text-gray-500 border border-gray-700
+                   hover:text-gray-300 hover:border-gray-600 transition-colors"
+      >
+        RESET
+      </button>
     </div>
   );
 }

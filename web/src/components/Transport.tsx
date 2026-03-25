@@ -5,55 +5,95 @@ interface TransportProps {
   hasProcessed: boolean;
   isLooping: boolean;
   isPlaying: 'original' | 'processed' | null;
-  onPlayOriginal: () => void;
-  onPlayProcessed: () => void;
-  onStop: () => void;
+  activeTrack: 'original' | 'processed';
+  onPlayPause: () => void;
+  onToggleTrack: () => void;
   onExport: () => void;
   onRestart: () => void;
+  onToggleLoop: () => void;
 }
 
 export function Transport({
-  hasOriginal, hasProcessed, isLooping, isPlaying,
-  onPlayOriginal, onPlayProcessed, onStop, onExport, onRestart,
+  hasOriginal, hasProcessed, isLooping, isPlaying, activeTrack,
+  onPlayPause, onToggleTrack, onExport, onRestart, onToggleLoop,
 }: TransportProps) {
-  const btnBase = 'px-4 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed';
+  const canPlay = activeTrack === 'processed' ? hasProcessed : hasOriginal;
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <button
-        onClick={onPlayOriginal}
-        disabled={!hasOriginal}
-        className={`${btnBase} ${isPlaying === 'original' ? 'bg-blue-500 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-      >
-        ORIGINAL
-      </button>
-      <button
-        onClick={onPlayProcessed}
-        disabled={!hasProcessed}
-        className={`${btnBase} ${isPlaying === 'processed' ? 'bg-teal-500 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}
-      >
-        {isLooping ? 'PLAY LOOP' : 'PROCESSED'}
-      </button>
-      <button
-        onClick={onStop}
-        disabled={!isPlaying}
-        className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700`}
-      >
-        STOP
-      </button>
+    <div className="flex items-center gap-1.5">
+      {/* Restart */}
       <button
         onClick={onRestart}
-        disabled={!isPlaying}
-        className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700`}
-        title="Restart from beginning"
+        disabled={!canPlay}
+        className="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Restart"
       >
-        RESTART
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <rect x="1" y="2" width="2" height="10" fill="currentColor"/>
+          <path d="M12 7L5 2.5V11.5L12 7Z" fill="currentColor"/>
+        </svg>
       </button>
+
+      {/* Play / Pause */}
+      <button
+        onClick={onPlayPause}
+        disabled={!canPlay}
+        className={`w-11 h-11 flex items-center justify-center rounded-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+          isPlaying
+            ? 'bg-teal-500 text-white hover:bg-teal-400'
+            : 'bg-gray-800 text-gray-300 hover:bg-gray-700 hover:text-white'
+        }`}
+        title={isPlaying ? 'Pause' : 'Play'}
+      >
+        {isPlaying ? (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="3" y="2" width="4" height="12" rx="1" fill="currentColor"/>
+            <rect x="9" y="2" width="4" height="12" rx="1" fill="currentColor"/>
+          </svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M4 2L14 8L4 14V2Z" fill="currentColor"/>
+          </svg>
+        )}
+      </button>
+
+      {/* A/B toggle */}
+      <button
+        onClick={onToggleTrack}
+        disabled={!hasOriginal}
+        className={`h-9 px-3 rounded-lg text-xs font-bold tracking-wide transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+          activeTrack === 'processed'
+            ? 'bg-teal-500/15 text-teal-400 border border-teal-500/30'
+            : 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
+        }`}
+        title={`Listening to ${activeTrack === 'processed' ? 'processed' : 'original'} — click to switch`}
+      >
+        {activeTrack === 'processed' ? 'B' : 'A'}
+      </button>
+
+      {/* Loop */}
+      <button
+        onClick={onToggleLoop}
+        className={`h-9 px-3 rounded-lg text-xs font-medium transition-colors ${
+          isLooping
+            ? 'bg-teal-500/15 text-teal-400 border border-teal-500/30'
+            : 'bg-gray-800 text-gray-500 border border-gray-700 hover:text-gray-300'
+        }`}
+        title="Loop playback"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M11 4H4.5C3.12 4 2 5.12 2 6.5S3.12 9 4.5 9H9.5C10.88 9 12 10.12 12 11.5S10.88 14 9.5 14H3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+          <path d="M9 2L11.5 4L9 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+        </svg>
+      </button>
+
       <div className="flex-1" />
+
+      {/* Export */}
       <button
         onClick={onExport}
         disabled={!hasProcessed}
-        className={`${btnBase} bg-gray-800 text-gray-300 hover:bg-gray-700`}
+        className="h-9 px-4 rounded-lg text-xs font-medium bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700 transition-colors border border-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
       >
         EXPORT WAV
       </button>

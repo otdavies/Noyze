@@ -20,13 +20,26 @@ pub fn process_reverb(samples: &[f32], sample_rate: u32, size: f32, damping: f32
     reverb_node.set_sample_rate(sample_rate as f64);
     reverb_node.reset();
 
-    let mut output = Vec::with_capacity(samples.len());
-    for &s in samples {
-        // Feed mono to both channels of stereo reverb
-        let out = reverb_node.tick(&Frame::from([s, s]));
-        // Average both channels back to mono
+    // Add tail for reverb decay — use RT60 scaled by mix to capture meaningful tail
+    let tail_samples = (time * sample_rate as f32 * mix) as usize;
+    let total_len = samples.len() + tail_samples;
+    let mut output = Vec::with_capacity(total_len);
+
+    for i in 0..total_len {
+        let dry = if i < samples.len() { samples[i] } else { 0.0 };
+        let out = reverb_node.tick(&Frame::from([dry, dry]));
         let wet = (out[0] + out[1]) * 0.5;
-        output.push(s * (1.0 - mix) + wet * mix);
+        output.push(dry * (1.0 - mix) + wet * mix);
+    }
+
+    // Fade out the tail to avoid abrupt cutoff
+    if tail_samples > 0 {
+        let fade_len = std::cmp::min(tail_samples, sample_rate as usize / 4); // 250ms fade max
+        let tail_start = output.len() - fade_len;
+        for i in 0..fade_len {
+            let t = i as f32 / fade_len as f32;
+            output[tail_start + i] *= 1.0 - t;
+        }
     }
 
     output

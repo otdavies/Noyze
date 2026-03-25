@@ -120,8 +120,8 @@ fn stutter_beat(beat: &[f32], sample_rate: u32, rng: &mut Rng) -> Vec<f32> {
     let len = beat.len();
     if len < 128 { return beat.to_vec(); }
 
-    // Choose a musical subdivision: 1/2, 1/3, or 1/4 of the beat
-    let subdivisions = [2, 3, 4];
+    // Fast musical subdivisions: 1/8, 1/12, 1/16 of the beat for rapid-fire stutter
+    let subdivisions = [6, 8, 12, 16];
     let sub_idx = (rng.next() * subdivisions.len() as f32) as usize;
     let num_slices = subdivisions[sub_idx.min(subdivisions.len() - 1)];
     let slice_len = len / num_slices;
@@ -130,10 +130,10 @@ fn stutter_beat(beat: &[f32], sample_rate: u32, rng: &mut Rng) -> Vec<f32> {
 
     // Pick source slice (weighted toward beat start for musicality — transient is there)
     let source_slice = (rng.next() * rng.next() * num_slices as f32) as usize;
-    let source_start = source_slice * slice_len;
+    let source_start = (source_slice * slice_len).min(len.saturating_sub(slice_len));
 
-    let fade_len = (sample_rate as f32 * 0.006) as usize; // 6ms fade
-    let decay_per_repeat = 0.89f32; // ~-1dB per repeat
+    let fade_len = (sample_rate as f32 * 0.003) as usize; // 3ms fade (shorter for fast stutters)
+    let decay_per_repeat = 0.93f32; // gentler decay for more repetitions
 
     let mut output = Vec::with_capacity(len);
     let mut repeat_idx = 0u32;

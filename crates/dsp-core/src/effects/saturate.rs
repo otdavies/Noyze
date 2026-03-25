@@ -27,8 +27,16 @@ pub fn process_saturate(samples: &[f32], sample_rate: u32, drive_db: f32, warmth
     );
     let mut lpf = lpf_coeffs.ok().map(|c| DirectForm2Transposed::<f32>::new(c));
 
+    // DC blocker state (first-order highpass at ~10 Hz)
+    let dc_r = 1.0 - (2.0 * std::f32::consts::PI * 10.0 / oversampled_sr as f32);
+    let mut dc_x_prev = 0.0f32;
+    let mut dc_y_prev = 0.0f32;
+
+    // Measure input RMS for gain matching
+    let in_rms = (upsampled.iter().map(|s| s * s).sum::<f32>() / upsampled.len().max(1) as f32).sqrt();
+
     // Process at 2x sample rate (reduces aliasing from tanh nonlinearity)
-    let processed: Vec<f32> = upsampled
+    let mut processed: Vec<f32> = upsampled
         .iter()
         .map(|&s| {
             let driven = s * drive;
@@ -41,12 +49,28 @@ pub fn process_saturate(samples: &[f32], sample_rate: u32, drive_db: f32, warmth
             };
 
             // Apply lowpass if coefficients were valid
-            match lpf.as_mut() {
+            let filtered = match lpf.as_mut() {
                 Some(f) => f.run(clipped),
                 None => clipped,
-            }
+            };
+
+            // DC blocker to remove offset from asymmetric clipping
+            let dc_out = filtered - dc_x_prev + dc_r * dc_y_prev;
+            dc_x_prev = filtered;
+            dc_y_prev = dc_out;
+
+            dc_out
         })
         .collect();
+
+    // Match output RMS to input RMS to prevent level loss
+    let out_rms = (processed.iter().map(|s| s * s).sum::<f32>() / processed.len().max(1) as f32).sqrt();
+    if out_rms > 1e-8 && in_rms > 1e-8 {
+        let gain = in_rms / out_rms;
+        for s in processed.iter_mut() {
+            *s *= gain;
+        }
+    }
 
     // --- Downsample back to original rate ---
     downsample_2x(&processed, sr)
