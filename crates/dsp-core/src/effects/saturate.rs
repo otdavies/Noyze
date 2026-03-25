@@ -1,125 +1,83 @@
-/// Tape saturation — asymmetric soft-clipping with warmth-dependent treble rolloff.
+/// Tape saturation — musical soft-clipping with warmth control.
 ///
-/// Uses the `biquad` crate for the lowpass filter (fixes hardcoded 44100 Hz).
-/// Uses `rubato` for 2x oversampling to reduce aliasing from nonlinear processing.
+/// Uses 2x oversampling to reduce aliasing from the nonlinear waveshaper.
+/// Drive controls how hard the signal is pushed into the saturator.
+/// Warmth applies a gentle high-shelf cut for analog character.
 
 use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F32};
-use rubato::{FftFixedIn, Resampler};
 
 pub fn process_saturate(samples: &[f32], sample_rate: u32, drive_db: f32, warmth: f32) -> Vec<f32> {
     let sr = sample_rate as usize;
-    let oversampled_sr = sr * 2;
+    let oversampled_sr = (sr * 2) as f32;
 
-    // --- 2x Oversample via Rubato ---
-    let upsampled = upsample_2x(samples, sr);
+    // 2x upsample
+    let upsampled = linear_upsample_2x(samples);
 
-    // Convert drive_db to linear gain
-    let drive = 10.0f32.powf(drive_db / 20.0);
+    // Gentle drive curve: 0dB → 1x, 6dB → ~1.4x, 12dB → ~2x, 24dB → ~4x
+    // Using sqrt scaling so high drive values don't obliterate the signal
+    let drive_linear = 10.0f32.powf(drive_db / 40.0); // /40 instead of /20 = sqrt of normal
 
-    // Lowpass filter for treble rolloff — cutoff decreases with warmth
-    // Now sample-rate aware via biquad crate
-    let fc = 20000.0 * (1.0 - warmth * 0.7);
-    let lpf_coeffs = Coefficients::<f32>::from_params(
+    // Wet/dry mix scales with drive: low drive = mostly dry, high drive = mostly wet
+    let mix = ((drive_db - 1.0) / 23.0).clamp(0.0, 1.0) * 0.8 + 0.2;
+
+    // Anti-alias lowpass at Nyquist before downsampling
+    let aa_coeffs = Coefficients::<f32>::from_params(
         Type::LowPass,
-        (oversampled_sr as f32).hz(),
-        fc.hz(),
+        oversampled_sr.hz(),
+        (sr as f32 * 0.95).hz(), // just below original Nyquist
         Q_BUTTERWORTH_F32,
     );
-    let mut lpf = lpf_coeffs.ok().map(|c| DirectForm2Transposed::<f32>::new(c));
+    let mut aa_filter = aa_coeffs.ok().map(|c| DirectForm2Transposed::<f32>::new(c));
 
-    // DC blocker state (first-order highpass at ~10 Hz)
-    let dc_r = 1.0 - (2.0 * std::f32::consts::PI * 10.0 / oversampled_sr as f32);
-    let mut dc_x_prev = 0.0f32;
-    let mut dc_y_prev = 0.0f32;
+    // Warmth: gentle high-shelf cut. At warmth=1.0, -6dB above 4kHz.
+    // Much gentler than a lowpass — preserves presence and air.
+    let warmth_coeffs = if warmth > 0.01 {
+        let shelf_db = -(warmth * 6.0);
+        Coefficients::<f32>::from_params(
+            Type::HighShelf(shelf_db),
+            oversampled_sr.hz(),
+            4000.0f32.hz(),
+            0.707,
+        ).ok()
+    } else {
+        None
+    };
+    let mut warmth_filter = warmth_coeffs.map(|c| DirectForm2Transposed::<f32>::new(c));
 
-    // Measure input RMS for gain matching
-    let in_rms = (upsampled.iter().map(|s| s * s).sum::<f32>() / upsampled.len().max(1) as f32).sqrt();
-
-    // Process at 2x sample rate (reduces aliasing from tanh nonlinearity)
-    let mut processed: Vec<f32> = upsampled
+    // Process
+    let processed: Vec<f32> = upsampled
         .iter()
         .map(|&s| {
-            let driven = s * drive;
+            let dry = s;
+            let driven = s * drive_linear;
 
-            // Asymmetric soft clip
-            let clipped = if driven >= 0.0 {
-                driven.tanh() + 0.05 * (2.0 * driven).tanh()
-            } else {
-                driven.tanh() + 0.03 * (2.0 * driven).tanh()
-            };
+            // Simple tanh soft-clip — clean, musical, no weird harmonics
+            let wet = driven.tanh() / drive_linear.min(2.0).max(1.0);
+            // The division by min(drive,2) compensates for tanh's gain reduction
+            // at high drive, keeping perceived loudness closer to the original
 
-            // Apply lowpass if coefficients were valid
-            let filtered = match lpf.as_mut() {
-                Some(f) => f.run(clipped),
-                None => clipped,
-            };
+            // Blend wet/dry
+            let mut out = dry * (1.0 - mix) + wet * mix;
 
-            // DC blocker to remove offset from asymmetric clipping
-            let dc_out = filtered - dc_x_prev + dc_r * dc_y_prev;
-            dc_x_prev = filtered;
-            dc_y_prev = dc_out;
+            // Apply warmth filter
+            if let Some(ref mut f) = warmth_filter {
+                out = f.run(out);
+            }
 
-            dc_out
+            // Anti-alias filter before downsampling
+            if let Some(ref mut f) = aa_filter {
+                out = f.run(out);
+            }
+
+            out
         })
         .collect();
 
-    // Match output RMS to input RMS to prevent level loss
-    let out_rms = (processed.iter().map(|s| s * s).sum::<f32>() / processed.len().max(1) as f32).sqrt();
-    if out_rms > 1e-8 && in_rms > 1e-8 {
-        let gain = in_rms / out_rms;
-        for s in processed.iter_mut() {
-            *s *= gain;
-        }
-    }
-
-    // --- Downsample back to original rate ---
-    downsample_2x(&processed, sr)
+    // Downsample
+    linear_downsample_2x(&processed)
 }
 
-/// 2x upsample using Rubato's FFT-based resampler
-fn upsample_2x(samples: &[f32], sr: usize) -> Vec<f32> {
-    let chunk_size = samples.len();
-    if chunk_size == 0 {
-        return vec![];
-    }
-
-    let mut resampler = match FftFixedIn::<f32>::new(sr, sr * 2, chunk_size, 1, 1) {
-        Ok(r) => r,
-        Err(_) => {
-            // Fallback: simple linear interpolation if Rubato fails
-            return linear_upsample_2x(samples);
-        }
-    };
-
-    let input = vec![samples.to_vec()];
-    match resampler.process(&input, None) {
-        Ok(output) => output.into_iter().next().unwrap_or_else(|| linear_upsample_2x(samples)),
-        Err(_) => linear_upsample_2x(samples),
-    }
-}
-
-/// 2x downsample using Rubato's FFT-based resampler
-fn downsample_2x(samples: &[f32], target_sr: usize) -> Vec<f32> {
-    let chunk_size = samples.len();
-    if chunk_size == 0 {
-        return vec![];
-    }
-
-    let mut resampler = match FftFixedIn::<f32>::new(target_sr * 2, target_sr, chunk_size, 1, 1) {
-        Ok(r) => r,
-        Err(_) => {
-            return linear_downsample_2x(samples);
-        }
-    };
-
-    let input = vec![samples.to_vec()];
-    match resampler.process(&input, None) {
-        Ok(output) => output.into_iter().next().unwrap_or_else(|| linear_downsample_2x(samples)),
-        Err(_) => linear_downsample_2x(samples),
-    }
-}
-
-/// Fallback: simple linear interpolation upsample
+/// Zero-latency linear interpolation upsample
 fn linear_upsample_2x(samples: &[f32]) -> Vec<f32> {
     let mut out = Vec::with_capacity(samples.len() * 2);
     for i in 0..samples.len() {
@@ -130,7 +88,7 @@ fn linear_upsample_2x(samples: &[f32]) -> Vec<f32> {
     out
 }
 
-/// Fallback: simple decimation downsample
+/// Simple decimation downsample
 fn linear_downsample_2x(samples: &[f32]) -> Vec<f32> {
     samples.chunks(2).map(|c| {
         if c.len() == 2 { (c[0] + c[1]) * 0.5 } else { c[0] }

@@ -99,6 +99,25 @@ pub fn process_fp_disrupt(samples: &[f32], _sample_rate: u32, strength: f32) -> 
     }
 
     // ISTFT to reconstruct
-    let out = istft(&frames, fft_size, hop, samples.len());
-    out[..samples.len().min(out.len())].to_vec()
+    let mut out = istft(&frames, fft_size, hop, samples.len());
+    let len = samples.len().min(out.len());
+
+    // Crossfade from original at boundaries where OLA overlap is incomplete
+    let boundary = hop.min(len / 2);
+    for i in 0..boundary {
+        let t = i as f32 / boundary as f32;
+        let blend = t * t;
+        out[i] = samples[i] * (1.0 - blend) + out[i] * blend;
+    }
+    let end_start = len.saturating_sub(boundary);
+    for i in 0..boundary {
+        let idx = end_start + i;
+        if idx < len {
+            let t = i as f32 / boundary as f32;
+            let blend = t * t;
+            out[idx] = out[idx] * (1.0 - blend) + samples[idx] * blend;
+        }
+    }
+
+    out[..len].to_vec()
 }

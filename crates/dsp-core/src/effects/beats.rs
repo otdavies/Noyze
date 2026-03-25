@@ -132,14 +132,17 @@ fn stutter_beat(beat: &[f32], sample_rate: u32, rng: &mut Rng) -> Vec<f32> {
     let source_slice = (rng.next() * rng.next() * num_slices as f32) as usize;
     let source_start = (source_slice * slice_len).min(len.saturating_sub(slice_len));
 
-    let fade_len = (sample_rate as f32 * 0.003) as usize; // 3ms fade (shorter for fast stutters)
-    let decay_per_repeat = 0.93f32; // gentler decay for more repetitions
+    // Fade must be shorter than the slice to avoid crossfade_splice consuming
+    // the entire segment (which would prevent the output from growing → infinite loop)
+    let fade_len = ((sample_rate as f32 * 0.003) as usize).min(slice_len / 3);
+    let decay_per_repeat = 0.93f32;
 
     let mut output = Vec::with_capacity(len);
     let mut repeat_idx = 0u32;
+    let max_repeats = (len / slice_len + 2) as u32;
 
     // Fill beat with repeats of the source slice
-    while output.len() < len {
+    while output.len() < len && repeat_idx < max_repeats {
         let remaining = len - output.len();
         let take = remaining.min(slice_len);
         let end = (source_start + take).min(len);
@@ -148,7 +151,6 @@ fn stutter_beat(beat: &[f32], sample_rate: u32, rng: &mut Rng) -> Vec<f32> {
 
         let mut slice = beat[source_start..end].to_vec();
 
-        // Per-repeat volume decay
         let gain = decay_per_repeat.powi(repeat_idx as i32);
         for s in slice.iter_mut() {
             *s *= gain;

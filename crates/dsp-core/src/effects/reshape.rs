@@ -73,6 +73,27 @@ pub fn process_reshape(samples: &[f32], sample_rate: u32, spread: f32, center: f
         }
     }
 
-    let out = istft(&frames, fft_size, hop, samples.len());
-    out[..samples.len().min(out.len())].to_vec()
+    let mut out = istft(&frames, fft_size, hop, samples.len());
+    let len = samples.len().min(out.len());
+
+    // The first and last `hop` samples have incomplete OLA overlap (Hann window
+    // ramps from zero), producing near-silence. Crossfade from the original
+    // signal to eliminate the leading/trailing silence.
+    let boundary = hop.min(len / 2);
+    for i in 0..boundary {
+        let t = i as f32 / boundary as f32;
+        let blend = t * t; // quadratic ease-in
+        out[i] = samples[i] * (1.0 - blend) + out[i] * blend;
+    }
+    let end_start = len.saturating_sub(boundary);
+    for i in 0..boundary {
+        let idx = end_start + i;
+        if idx < len {
+            let t = i as f32 / boundary as f32;
+            let blend = t * t;
+            out[idx] = out[idx] * (1.0 - blend) + samples[idx] * blend;
+        }
+    }
+
+    out[..len].to_vec()
 }
